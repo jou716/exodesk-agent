@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.adapters import LocalTicketProvider, TicketClosed, TicketUpsert
 from app.models import Base, ConversationSession, Ticket
+from app.services.customers import ensure_customer
 from app.services.memory import ConversationMemory
 
 
@@ -29,6 +30,14 @@ def db():
 def make_ticket(db, ticket_id: str, status: str = "open") -> Ticket:
     provider = LocalTicketProvider(db)
     return provider.upsert_ticket(TicketUpsert(id=ticket_id, subject=f"Subject {ticket_id}", status=status))
+
+
+def attach_customer(db, ticket: Ticket, name: str, email: str) -> Ticket:
+    customer = ensure_customer(db, name=name, email=email)
+    ticket.customer_id = customer.id
+    db.commit()
+    db.refresh(ticket)
+    return ticket
 
 
 def test_context_is_isolated_by_ticket(db):
@@ -91,4 +100,96 @@ def test_reopened_ticket_gets_new_session_and_prior_summary(db):
     assert "first session issue" in context.previous_summary
     sessions = db.scalars(select(ConversationSession).where(ConversationSession.ticket_id == "T-REOPEN")).all()
     assert len(sessions) == 2
+
+
+def test_same_customer_gets_cross_ticket_history(db):
+    old_ticket = attach_customer(
+        db,
+        make_ticket(db, "T-OLD"),
+        "Emma Walker",
+        "emma@example.com",
+    )
+    memory = ConversationMemory(db)
+    memory.add_message("T-OLD", "customer", "The left knee cuff kept slipping during therapy.")
+    memory.add_message("T-OLD", "agent", "We replaced the medium cuff and recalibrated the knee joint.")
+    old_ticket.status = "solved"
+    db.commit()
+
+    current_ticket = attach_customer(
+        db,
+        make_ticket(db, "T-CURRENT"),
+        "Emma Walker",
+        "emma@example.com",
+    )
+    memory.add_message("T-CURRENT", "customer", "The new cuff now feels loose again.")
+
+    context = memory.build_context("T-CURRENT")
+
+    assert context.customer_history_ticket_ids == ["T-OLD"]
+    assert "left knee cuff kept slipping" in context.customer_history_summary
+    assert "replaced the medium cuff" in context.customer_history_summary
+    assert "customer_history" in context.transcript
+    assert "The new cuff now feels loose again." not in context.customer_history_summary
+    assert current_ticket.id not in context.customer_history_ticket_ids
+
+
+def test_cross_ticket_history_is_isolated_by_customer(db):
+    other_ticket = attach_customer(
+        db,
+        make_ticket(db, "T-OTHER"),
+        "Other Customer",
+        "other@example.com",
+    )
+    memory = ConversationMemory(db)
+    memory.add_message("T-OTHER", "customer", "Private history for another customer.")
+    other_ticket.status = "solved"
+    db.commit()
+
+    attach_customer(
+        db,
+        make_ticket(db, "T-MINE"),
+        "My Customer",
+        "mine@example.com",
+    )
+    memory.add_message("T-MINE", "customer", "My current issue.")
+
+    context = memory.build_context("T-MINE")
+
+    assert context.customer_history_ticket_ids == []
+    assert context.customer_history_summary == ""
+    assert "Private history for another customer." not in context.transcript
+
+
+def test_customer_history_is_bounded_and_does_not_duplicate_current_ticket(db):
+    attach_customer(
+        db,
+        make_ticket(db, "T-ARCHIVE"),
+        "Repeat Customer",
+        "repeat@example.com",
+    )
+    memory = ConversationMemory(db, history_max_chars=260)
+    for index in range(6):
+        memory.add_message(
+            "T-ARCHIVE",
+            "customer",
+            f"archived issue {index} " + ("long detail " * 30),
+        )
+    archive_ticket = db.get(Ticket, "T-ARCHIVE")
+    archive_ticket.status = "solved"
+    db.commit()
+
+    attach_customer(
+        db,
+        make_ticket(db, "T-NEW"),
+        "Repeat Customer",
+        "repeat@example.com",
+    )
+    memory.add_message("T-NEW", "customer", "current issue only")
+
+    context = memory.build_context("T-NEW")
+
+    assert context.customer_history_ticket_ids == ["T-ARCHIVE"]
+    assert len(context.customer_history_summary) <= 260
+    assert "current issue only" not in context.customer_history_summary
+    assert context.customer_history_summary.count("T-NEW") == 0
 

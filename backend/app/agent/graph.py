@@ -179,6 +179,20 @@ class AgentGraph:
                 run.token_usage = (run.token_usage or 0) + total
                 db.commit()
 
+    @staticmethod
+    def _memory_context(state: AgentState) -> str:
+        sections: list[str] = []
+        customer_history = str(state.get("customer_history_summary") or "").strip()
+        previous_summary = str(state.get("previous_summary") or "").strip()
+        older_summary = str(state.get("memory_summary") or "").strip()
+        if customer_history:
+            sections.append(f"PAST_TICKETS (same customer):\n{customer_history}")
+        if previous_summary:
+            sections.append(f"PRIOR_SESSIONS (this ticket):\n{previous_summary}")
+        if older_summary:
+            sections.append(f"OLDER_MESSAGES (this session):\n{older_summary}")
+        return "\n\n".join(sections)
+
     def load_context(self, state: AgentState) -> AgentState:
         started = perf_counter()
         with self.session_factory() as db:
@@ -190,6 +204,8 @@ class AgentGraph:
                 "transcript": context.transcript,
                 "previous_summary": context.previous_summary,
                 "memory_summary": context.memory_summary,
+                "customer_history_summary": context.customer_history_summary,
+                "customer_history_ticket_ids": context.customer_history_ticket_ids,
                 "total_message_count": context.total_message_count,
                 "context_chars": context.char_count,
                 "closed": context.ended,
@@ -204,7 +220,8 @@ class AgentGraph:
             status="failed" if payload["closed"] else "succeeded",
             output_summary=(
                 f"messages={payload['total_message_count']}; chars={payload['context_chars']}; "
-                f"closed={str(payload['closed']).lower()}\n"
+                f"closed={str(payload['closed']).lower()}; "
+                f"history_tickets={len(payload['customer_history_ticket_ids'])}\n"
                 + _json_text(
                     {
                         "ticket": {
@@ -219,6 +236,9 @@ class AgentGraph:
                         "context_chars": payload["context_chars"],
                         "reply_language": payload["reply_language"],
                         "closed": payload["closed"],
+                        "customer_history_ticket_ids": payload["customer_history_ticket_ids"],
+                        "customer_history_chars": len(payload["customer_history_summary"]),
+                        "customer_history": payload["customer_history_summary"][:900],
                         "transcript": payload["transcript"][:600],
                     }
                 )
@@ -446,6 +466,7 @@ class AgentGraph:
                 used_tools=list(used),
                 tool_results=results,
                 remaining_calls=settings.agent_max_tool_calls - len(results),
+                memory_context=self._memory_context(state),
             ) if settings.llm_enabled else None
             if decision is not None:
                 next_tool = decision.get("tool")
@@ -573,6 +594,7 @@ class AgentGraph:
                 state.get("evidence", []),
                 risk,
                 reply_language=reply_language,
+                memory_context=self._memory_context(state),
             )
             if llm_attempt:
                 self._add_token_usage(state["run_id"], llm_attempt.get("usage"))

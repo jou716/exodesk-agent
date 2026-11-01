@@ -29,7 +29,7 @@ def create_app(
 
     app = FastAPI(
         title=settings.app_name,
-        version="0.10.0",
+        version="0.11.0",
         lifespan=lifespan,
     )
     app.state.services = services or create_services()
@@ -52,7 +52,7 @@ def create_app(
     def root() -> dict:
         return {
             "name": settings.app_name,
-            "version": "0.10.0",
+            "version": "0.11.0",
             "docs": "/docs",
             "health": "/api/health",
         }

@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     tool_timeout_seconds: float = 15.0
     context_max_chars: int = 12000
     context_recent_messages: int = 8
+    customer_memory_ticket_limit: int = 3
+    customer_memory_max_chars: int = 1800
 
     @property
     def cors_origin_list(self) -> list[str]:

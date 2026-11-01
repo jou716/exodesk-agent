@@ -12,6 +12,8 @@ class AgentState(TypedDict, total=False):
     transcript: str
     previous_summary: str
     memory_summary: str
+    customer_history_summary: str
+    customer_history_ticket_ids: list[str]
     total_message_count: int
     reply_language: str
     customer_language: str

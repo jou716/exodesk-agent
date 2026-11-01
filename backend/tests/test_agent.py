@@ -942,3 +942,63 @@ def test_final_localization_self_audit_retries_untranslated_spans(monkeypatch):
     assert len(prompts) == 2
     assert '"Hi"' in prompts[1]
 
+
+def test_generation_prompt_includes_bounded_customer_memory(monkeypatch):
+    monkeypatch.setattr(settings, "llm_enabled", True)
+    monkeypatch.setattr(settings, "llm_api_key", "test-key")
+    captured: dict[str, str] = {}
+
+    def fake_request(messages, **kwargs):
+        captured["prompt"] = messages[-1]["content"]
+        return (
+            {"customer_summary": "test", "draft_text": "Please check the device.", "draft_language": "en"},
+            {"total_tokens": 5},
+            "qwen-max",
+        )
+
+    monkeypatch.setattr(llm_service, "_request_json", fake_request)
+    llm_service.generate_with_llm(
+        ticket={"id": "T-1"},
+        device=None,
+        messages=[{"role": "customer", "content": "Current issue."}],
+        evidence=[],
+        risk={"level": "normal"},
+        memory_context="PAST_TICKETS (same customer):\nticket=T-OLD | status=solved | prior cuff replacement",
+    )
+
+    assert "CUSTOMER_MEMORY:" in captured["prompt"]
+    assert "ticket=T-OLD" in captured["prompt"]
+    assert "Never treat an old issue" in captured["prompt"]
+
+
+def test_planner_prompt_includes_customer_memory(monkeypatch):
+    monkeypatch.setattr(settings, "llm_enabled", True)
+    monkeypatch.setattr(settings, "llm_api_key", "test-key")
+    captured: dict[str, str] = {}
+
+    def fake_request(messages, **kwargs):
+        captured["prompt"] = messages[-1]["content"]
+        return (
+            {"action": "finalize", "tool": None, "arguments": {}, "reason": "enough"},
+            {"total_tokens": 5},
+            "qwen-max",
+        )
+
+    monkeypatch.setattr(llm_service, "_request_json", fake_request)
+    llm_service.plan_tool_call(
+        ticket={"id": "T-1"},
+        device=None,
+        messages=[{"role": "customer", "content": "Current issue."}],
+        risk={"level": "normal"},
+        intent="normal",
+        tools=[],
+        used_tools=[],
+        tool_results=[],
+        remaining_calls=3,
+        memory_context="PAST_TICKETS (same customer):\nticket=T-OLD | prior cuff replacement",
+    )
+
+    assert "CUSTOMER_MEMORY:" in captured["prompt"]
+    assert "ticket=T-OLD" in captured["prompt"]
+    assert "The current conversation always takes precedence" in captured["prompt"]
+

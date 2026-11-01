@@ -142,6 +142,7 @@ def plan_tool_call(
     used_tools: list[str],
     tool_results: list[dict[str, Any]],
     remaining_calls: int,
+    memory_context: str = "",
 ) -> dict[str, Any] | None:
     if not settings.llm_enabled or not settings.llm_api_key:
         return None
@@ -182,6 +183,9 @@ Rules:
 - prepare_ticket_summary is optional and must not be used if it adds no new evidence.
 - You have at most {remaining_calls} tool calls left. Do not exceed the budget.
 - The safety gate has already approved this case; do not add unsafe repair or diagnostic steps.
+- CUSTOMER_MEMORY is background from earlier sessions or tickets. Use it only to recognize recurring
+  device details, prior resolutions, or stated preferences. Never treat it as the current request and
+  never assume an old issue is still active. The current conversation always takes precedence.
 
 TICKET:
 {json.dumps(ticket, ensure_ascii=False, default=str)}
@@ -195,6 +199,9 @@ RISK:
 INTENT: {intent}
 CONVERSATION:
 {conversation}
+
+CUSTOMER_MEMORY:
+{memory_context[:5000] if memory_context else 'none'}
 
 AVAILABLE_TOOLS:
 {json.dumps(tools, ensure_ascii=False, default=str)}
@@ -258,6 +265,7 @@ def generate_with_llm(
     evidence: list[dict[str, Any]],
     risk: dict[str, Any],
     reply_language: str = "en",
+    memory_context: str = "",
 ) -> dict[str, str] | None:
     if not settings.llm_enabled or not settings.llm_api_key:
         return None
@@ -295,6 +303,10 @@ If EVIDENCE is empty, do not claim the device behavior is normal or abnormal. Yo
 model, serial number, current firmware version, and the exact error code or observed behavior in draft_text.
 Use CURRENT_DATE when describing warranty, deadlines, or whether coverage is still active. If
 warranty_until is before CURRENT_DATE, say the warranty expired on that date; never call it valid.
+CUSTOMER_MEMORY contains background from earlier sessions or tickets. Use it only to avoid asking for
+facts the customer already supplied and to recognize recurring device details. Never treat an old issue
+as the current issue, never mention the memory source, and never let it override CONVERSATION or
+TICKET. The current customer message always takes precedence.
 Do not use placeholders such as [Your Name]. Localize the signature to match draft_text:
 use "After-Sales Support Team" for English, "售后支持团队" for Chinese, or a natural
 translation of the same sign-off for any other customer language.
@@ -308,6 +320,10 @@ DEVICE: {json.dumps(device, ensure_ascii=False) if device else 'unknown'}
 RISK: {json.dumps(risk, ensure_ascii=False)}
 CONVERSATION:
 {conversation}
+
+CUSTOMER_MEMORY:
+{memory_context[:5000] if memory_context else 'none'}
+
 EVIDENCE:
 {evidence_text}
 """

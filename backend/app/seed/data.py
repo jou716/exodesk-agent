@@ -90,6 +90,34 @@ DEVICES: list[dict] = [
 
 TICKETS: list[dict] = [
     {
+        "id": "T-2399",
+        "external_id": "ZD-2399",
+        "channel": "Amazon",
+        "customer_name": "Emma Walker",
+        "customer_email": "emma.walker@example.com",
+        "subject": "Knee cuff slipping during therapy",
+        "status": "solved",
+        "priority": "normal",
+        "serial_no": "K2-2025-00417",
+        "language": "en",
+        "risk_flag": "none",
+        "offset": -180,
+        "messages": [
+            (
+                "customer",
+                "The medium knee cuff keeps slipping during therapy sessions and the knee joint "
+                "feels loose after about ten minutes.",
+                -180,
+            ),
+            (
+                "agent",
+                "We sent a replacement cuff and asked the clinic to recalibrate the knee joint after fitting it. "
+                "The clinic confirmed the device then completed a full session without slipping.",
+                -176,
+            ),
+        ],
+    },
+    {
         "id": "T-2401",
         "external_id": "ZD-2401",
         "channel": "Amazon",
